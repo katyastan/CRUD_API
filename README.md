@@ -10,3 +10,6 @@ npm run start:dev
 
 **Start in Production Mode:**
 npm run start:prod
+
+**Run tests:**
+npm run test
