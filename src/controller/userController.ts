@@ -1,6 +1,5 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import { validate as isUuid } from 'uuid';
-import { User } from '../types/user';
 import {
   getAllUsers,
   getUserById as getUserByIdFromModel,
