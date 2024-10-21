@@ -1,29 +1,20 @@
-import * as http from 'http';
-import * as dotenv from 'dotenv';
-import { handleRequest } from './routes/routes';
+import { startCluster } from "./cluster";
+import { handleRequest } from "./routes/routes";
+import * as http from "http";
+import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PORT = process.env.PORT || 4000;
+const PORT = parseInt(process.env.PORT || "4000", 10);
 
-const server = http.createServer((req, res) => {
-  req.on('error', (err) => {
-    console.error('Request error:', err);
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ message: 'Bad Request' }));
+if (process.argv[2] === "multi") {
+  startCluster();
+} else {
+  const server = http.createServer((req, res) => {
+    handleRequest(req, res);
   });
 
-  res.on('error', (err) => {
-    console.error('Response error:', err);
+  server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
   });
-
-  handleRequest(req, res);
-});
-
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
-
-server.on('error', (err) => {
-  console.error('Server error:', err);
-});
+}

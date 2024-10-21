@@ -23,25 +23,21 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+// src/index.ts
+const cluster_1 = require("./cluster");
+const routes_1 = require("./routes/routes");
 const http = __importStar(require("http"));
 const dotenv = __importStar(require("dotenv"));
-const routes_1 = require("./routes/routes");
 dotenv.config();
-const PORT = process.env.PORT || 4000;
-const server = http.createServer((req, res) => {
-    req.on('error', (err) => {
-        console.error('Request error:', err);
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Bad Request' }));
+const PORT = parseInt(process.env.PORT || '3000', 10);
+if (process.argv[2] === 'multi') {
+    (0, cluster_1.startCluster)();
+}
+else {
+    const server = http.createServer((req, res) => {
+        (0, routes_1.handleRequest)(req, res);
     });
-    res.on('error', (err) => {
-        console.error('Response error:', err);
+    server.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
     });
-    (0, routes_1.handleRequest)(req, res);
-});
-server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
-server.on('error', (err) => {
-    console.error('Server error:', err);
-});
+}

@@ -1,55 +1,92 @@
-import cluster from "cluster";
-import { cpus } from "os";
 import * as http from "http";
+import cluster from "cluster";
+import { Worker } from "cluster";
+import { cpus } from "os";
 import { handleRequest } from "./routes/routes";
+import { users, synchronizeUsers } from "./models/modelUser";
+import * as dotenv from "dotenv";
+import { IncomingMessage, ServerResponse } from "http";
+import { Message } from "./types/message";
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
-const numCPUs = cpus().length;
+dotenv.config();
 
-if (cluster.isPrimary) {
-  console.log(`Primary process is running (PID: ${process.pid})`);
+const PORT = parseInt(process.env.PORT || "4000", 10);
 
-  for (let i = 0; i < numCPUs - 1; i++) {
-    const workerPort = PORT + i + 1;
-    cluster.fork({ WORKER_PORT: workerPort });
-  }
+export function startCluster() {
+  if (cluster.isPrimary) {
+    const numWorkers = cpus().length - 1 || 1;
+    const workers: Worker[] = [];
 
-  let currentWorker = 0;
+    console.log(`Master ${process.pid} is running`);
 
-  const loadBalancer = http.createServer((req, res) => {
-    const workerPort = PORT + (currentWorker % (numCPUs - 1)) + 1;
-    const options = {
-      hostname: "localhost",
-      port: workerPort,
-      path: req.url,
-      method: req.method,
-      headers: req.headers,
-    };
+    for (let i = 0; i < numWorkers; i++) {
+      const workerPort = PORT + i + 1;
+      const worker = cluster.fork({ WORKER_PORT: workerPort.toString() });
+      workers.push(worker);
+    }
 
-    const proxy = http.request(options, (workerRes) => {
-      res.writeHead(workerRes.statusCode || 500, workerRes.headers);
-      workerRes.pipe(res, { end: true });
+    let currentWorker = 0;
+
+    const loadBalancer = http.createServer((req, res) => {
+      const workerPort = PORT + ((currentWorker % numWorkers) + 1);
+      const proxyReq = http.request(
+        {
+          hostname: "localhost",
+          port: workerPort,
+          path: req.url,
+          method: req.method,
+          headers: req.headers,
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+          proxyRes.pipe(res, { end: true });
+        }
+      );
+
+      req.pipe(proxyReq, { end: true });
+
+      currentWorker = (currentWorker + 1) % numWorkers;
     });
 
-    req.pipe(proxy, { end: true });
-    currentWorker++;
-  });
+    loadBalancer.listen(PORT, () => {
+      console.log(`Load balancer is running on port ${PORT}`);
+    });
 
-  loadBalancer.listen(PORT, () => {
-    console.log(`Load balancer is listening on port ${PORT}`);
-  });
+    for (const worker of workers) {
+      worker.on("message", (message: Message) => {
+        if (message.type === "syncRequest") {
+          worker.send({ type: "sync", data: users });
+        } else if (message.type === "update") {
+          synchronizeUsers(message.data);
+          for (const otherWorker of workers) {
+            if (otherWorker !== worker) {
+              otherWorker.send({ type: "sync", data: users });
+            }
+          }
+        }
+      });
+    }
+  } else {
+    const workerPort = process.env.WORKER_PORT
+      ? parseInt(process.env.WORKER_PORT, 10)
+      : PORT + 1;
 
-  cluster.on("exit", (worker) => {
-    console.log(`Worker ${worker.process.pid} died`);
-    cluster.fork();
-  });
-} else {
-  const workerPort = process.env.WORKER_PORT;
-  const server = http.createServer((req, res) => {
-    handleRequest(req, res);
-  });
+    const server = http.createServer(
+      (req: IncomingMessage, res: ServerResponse) => {
+        handleRequest(req, res);
+      }
+    );
 
-  server.listen(workerPort, () => {
-    console.log(`Worker ${process.pid} is listening on port ${workerPort}`);
-  });
+    server.listen(workerPort, () => {
+      console.log(`Worker ${process.pid} is running on port ${workerPort}`);
+    });
+
+    process.send && process.send({ type: "syncRequest" });
+
+    process.on("message", (message: Message) => {
+      if (message.type === "sync") {
+        synchronizeUsers(message.data);
+      }
+    });
+  }
 }
